@@ -7,9 +7,11 @@ __author__ = 'Alex Alkire'
 __version__ = '0.1'
 __license__ = 'MIT'
 
+import array
 import math
 import sys
 import numpy
+import copy
 
 P_TABLE = [0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344, 0xa4093822, 0x299f31d0,
   0x082efa98, 0xec4e6c89, 0x452821e6, 0x38d01377, 0xbe5466cf, 0x34e90c6c,
@@ -217,6 +219,7 @@ class Cursor:
 
     def next_bit(self, ):
         if self.bit_index == 0:
+            print(self.byte_index)
             self.bit_value = self.buffer[self.byte_index]
             self.byte_index += 1
             self.bit_index = 8
@@ -247,8 +250,8 @@ class BlowfishContext:
     def __init__(self, key):
         self.key = int.from_bytes(key[0:4], byteorder='big', signed=True)
         self.length = math.floor(len(key)/4)
-        self.s = S_TABLE.copy()
-        self.p = P_TABLE.copy()
+        self.s = copy.deepcopy(S_TABLE)
+        self.p = copy.deepcopy(P_TABLE)
         self.key_schedule()
 
     def key_schedule(self):
@@ -339,17 +342,65 @@ class BlowfishContext:
         return write_cursor.buffer[0:write_cursor.byte_index]
 
 
+def struct_to_file(symbol_art):
+    as_array = bytearray(16+symbol_art.header['layerCount']*16)
+    print("tofile:", symbol_art)
+    as_array[0:4] = symbol_art.header['authorId'].to_bytes(4, byteorder='little')
+    as_array[4] = symbol_art.header['layerCount']
+    as_array[5] = symbol_art.header['height']
+    as_array[6] = symbol_art.header['width']
+    as_array[7] = symbol_art.header['sound']
+
+    for layer_index in range(0, symbol_art.header['layerCount']):
+        as_array[8+16*layer_index] = symbol_art.layers[layer_index]['top_left']['x']
+        as_array[9+16*layer_index] = symbol_art.layers[layer_index]['top_left']['y']
+        as_array[10+16*layer_index] = symbol_art.layers[layer_index]['bottom_left']['x']
+        as_array[11+16*layer_index] = symbol_art.layers[layer_index]['bottom_left']['y']
+        as_array[12+16*layer_index] = symbol_art.layers[layer_index]['top_right']['x']
+        as_array[13+16*layer_index] = symbol_art.layers[layer_index]['top_right']['y']
+        as_array[14+16*layer_index] = symbol_art.layers[layer_index]['bottom_right']['x']
+        as_array[15+16*layer_index] = symbol_art.layers[layer_index]['bottom_right']['y']
+
+
+        value_a = ((symbol_art.layers[layer_index]['visible'] << 31) |
+                   (symbol_art.layers[layer_index]['textureIndex'] << 21) |
+                   (int(symbol_art.layers[layer_index]['transparency']*7) << 18) |
+                   (int(symbol_art.layers[layer_index]['colorB']/4) << 12) |
+                   (int(symbol_art.layers[layer_index]['colorG']/4) << 6) |
+                   (int(symbol_art.layers[layer_index]['colorR']/4) << 0)
+                   )
+        value_b = ((symbol_art.layers[layer_index]['colorZ'] << 12) |
+                   (symbol_art.layers[layer_index]['colorY'] << 6) |
+                   (symbol_art.layers[layer_index]['colorX'] << 0)
+                   )
+
+        as_array[16 + 16 * layer_index:20 + 16 * layer_index] = value_a.to_bytes(4, byteorder='little')
+        foo = as_array[16 + 16 * layer_index:20 + 16 * layer_index]
+        as_array[20 + 16 * layer_index:24 + 16 * layer_index] = value_b.to_bytes(4, byteorder='little')
+        bar =as_array[20 + 16 * layer_index:24 + 16 * layer_index]
+        pass
+    as_array = as_array + bytes(symbol_art.name, 'utf-16')
+    out = bytearray(4)
+    out[0] = 0x73
+    out[1] = 0x61
+    out[2] = 0x72
+    out[3] = 0x04
+    print("DP2:", as_array)
+    ctx = BlowfishContext(key=bf_key)
+    ctx.encrypt(as_array)
+    out = out + bytearray(as_array)
+    return out
+
 def decrypt_sar(path):
     # Open .sar file
-    try:
-        if path[-3:] != "sar":
-            raise Exception("File is not a .sar file. ", path)
-        with open(path, "rb") as f:
-            print("opened")
-            file_binary = f.read()
-            file_bytes = bytearray(file_binary)
-    except Exception as e:
-        print(e)
+
+    if path[-3:] != "sar":
+        raise Exception("File is not a .sar file. ", path)
+    with open(path, "rb") as f:
+        print("opened")
+        file_binary = f.read()
+        file_bytes = bytearray(file_binary)
+
     flag = file_bytes[3]
     if flag != 0x04 and flag != 0x84:
         raise Exception("Bad flag value.  Expected 0x04 or 0x84", flag)
@@ -359,6 +410,7 @@ def decrypt_sar(path):
     ctx = BlowfishContext(key=bf_key)
     payload = payload[0:(len(payload) - (len(payload)%8))]
     ctx.decrypt(payload)
+    print("DP1:", payload)
     for byte_itr in range(0, len(payload)):
         print(payload[byte_itr], end=", ")
     print()

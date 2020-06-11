@@ -11,10 +11,13 @@ import cv2
 import np
 
 IMAGE_DISPLAY_SIZE = (512, 512)
+COLOR_COMPENSATION = True
 
 class SymbolArt:
     def __init__(self, buffer):
+        print("B", buffer)
         self.layers = []
+        self.name =""
         self.header = {
             'authorId': int.from_bytes(buffer[0:4], byteorder='little'),
             'layerCount': buffer[4],
@@ -45,15 +48,18 @@ class SymbolArt:
                 'visible': (value_a >> 31) & 1 == 0,
                 'textureIndex': (value_a >> 21) & 1023,
                 'transparency': ((value_a >> 18) & 7) / 7,
-                'colorR': ((value_a >> 0) & 63) * 4,
-                'colorG': ((value_a >> 6) & 63) * 4,
-                'colorB': ((value_a >> 12) & 63) * 4,
+                'colorR': int(((value_a >> 0) & 63) *4),
+                'colorG': int(((value_a >> 6) & 63) *4),
+                'colorB': int(((value_a >> 12) & 63) *4),
                 # Probably unused..
-                'colorX': ((value_b >> 0) & 63),
-                'colorY': ((value_b >> 6) & 63),
-                'colorZ': ((value_b >> 12) & 63),
+                'colorX': int(((value_b >> 0) & 63)),
+                'colorY': int(((value_b >> 6) & 63)),
+                'colorZ': int(((value_b >> 12) & 63)),
             }
             self.layers.append(layer)
+        if len(buffer)> 24+self.header['layerCount']*16:
+            self.name = buffer[24+self.header['layerCount']*16:]
+        pass
 
     """
     Retrieve this symbol art as a cv2 image array.
@@ -70,12 +76,16 @@ class SymbolArt:
             r, g, b = layer['colorR'] / 255.0, layer['colorG'] / 255.0, layer['colorB'] / 255.0
 
             # Adjust colors to simulate PSO2 RGB values.  Without this colors will look darker ingame.
-            color = tuple(reversed((
-                1,
-                ((r * 0.76 + 0.265) * r),
-                ((g * 0.76 + 0.265) * g),
-                ((b * 0.76 + 0.265) * b)
-            )))
+            if COLOR_COMPENSATION == True:
+                color = tuple(reversed((
+                    1,
+                    (np.clip(r * 0.76 + 0.265 * r, 0, 1)),
+                    (np.clip((g * 0.76 + 0.265) * g, 0, 1)),
+                    (np.clip((b * 0.76 + 0.265) * b, 0, 1))
+                )))
+
+            else:
+                color = tuple(reversed((1,r,g,b)))
             color_mask[:] = color
             new_img = np.multiply(new_img, color_mask)
             h, w, c = new_img.shape
